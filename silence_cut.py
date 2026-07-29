@@ -13,11 +13,13 @@ The region list may be either:
   * two floats per line:  "<start_seconds> <end_seconds>"
   * raw ffmpeg silencedetect output (lines with silence_start:/silence_end:)
 
-Multi-clip aware: the audio/video tracks may hold any number of clips. Each
-timeline entry keeps its OWN producer and full inner content (bin id + clip
-effects); silence times (timeline-relative) are mapped into every clip's own
-source time by its timeline position, and clip effects are copied verbatim onto
-each resulting piece (their filter ids are renumbered to stay unique).
+Multi-clip aware: the audio/video tracks may hold any number of clips, so an
+already partially-cut project can be re-run. Each timeline entry keeps its OWN
+producer and full inner content (bin id + clip effects); regions are matched
+against each clip's own source in/out (regions and in/out share the media's time
+base), and clip effects are copied verbatim onto each resulting piece (their
+filter ids are renumbered to stay unique). Regions falling in already-deleted
+stretches simply match no clip and are ignored.
 
 Assumptions:
   * audio track  = <playlist id=AUDIO_PLAYLIST>
@@ -150,16 +152,11 @@ def render_playlist(
     if with_audio_prop:
         lines.append('  <property name="kdenlive:audio_track">1</property>')
     all_pieces: list[list[tuple[int, int, bool]]] = []
-    pos = 0  # timeline position (frames) of the current clip's start
     for in_str, out_str, producer, body in entries:
         in_f, out_f = tc_to_frames(in_str, fps), tc_to_frames(out_str, fps)
         dur = out_f - in_f + 1
-        # regions falling within this clip's timeline span, mapped to source frames
-        offset = in_f - pos
-        local = [
-            (rs + offset, re + offset) for rs, re in regions
-            if rs >= pos and re <= pos + dur - 1
-        ]
+        # regions are source-relative (detected on the media file), same as in/out
+        local = [(rs, re) for rs, re in regions if in_f <= rs and re <= out_f]
         pieces = (
             split_entry(in_f, out_f, local, pad, edge)
             if dur > min_entry_frames
@@ -175,7 +172,6 @@ def render_playlist(
             lines.append(
                 f'  <entry in="{a}" out="{b}" producer="{producer}">'
                 f'{piece_body}</entry>')
-        pos += dur  # advance by ORIGINAL clip length (region mapping is timeline-absolute)
     return "\n".join(lines), all_pieces
 
 
