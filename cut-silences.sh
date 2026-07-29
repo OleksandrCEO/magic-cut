@@ -16,6 +16,7 @@
 #   --min-silence SEC   minimum silence duration to cut (default 0.66)
 #   --pad FR            frames of pause kept each side (default: ~1/6 s per project fps, i.e. 5 @30fps, 2 @10fps)
 #   --min-entry SEC     only split clips longer than this (default 0 = all; use 30 for a fresh full pass)
+#   --delete            drop the silences and close the gaps (shortens the timeline) instead of isolating
 #   --in-place          edit the project file directly (default)
 #   --out FILE          write to a separate file instead
 #
@@ -30,7 +31,7 @@ PROJECT="${1:-}"
 [ -n "$PROJECT" ] && [ -f "$PROJECT" ] || { echo "usage: $0 PROJECT.kdenlive [options]" >&2; exit 1; }
 shift
 
-MEDIA=""; NOISE="-20"; MINSIL="0.66"; PAD=""; MINENTRY="0"; OUTMODE="--in-place"; OUTFILE=""
+MEDIA=""; NOISE="-20"; MINSIL="0.66"; PAD=""; MINENTRY="0"; OUTMODE="--in-place"; OUTFILE=""; DELETE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --media)       MEDIA="$2"; shift 2 ;;
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
     --min-silence) MINSIL="$2"; shift 2 ;;
     --pad)         PAD="$2"; shift 2 ;;
     --min-entry)   MINENTRY="$2"; shift 2 ;;
+    --delete)      DELETE="--delete"; shift ;;
     --in-place)    OUTMODE="--in-place"; shift ;;
     --out)         OUTMODE="--out"; OUTFILE="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -61,5 +63,6 @@ echo "  found $(grep -c silence_end "$REGIONS" || echo 0) silence intervals"
 
 ARGS=(python3 "$SCRIPT_DIR/silence_cut.py" "$PROJECT" --silences "$REGIONS" --min-entry "$MINENTRY")
 [ -n "$PAD" ] && ARGS+=(--pad "$PAD")   # else engine uses its fps-aware default
+[ -n "$DELETE" ] && ARGS+=(--delete)
 if [ "$OUTMODE" = "--out" ]; then ARGS+=(--out "$OUTFILE"); else ARGS+=(--in-place); fi
 "${ARGS[@]}"

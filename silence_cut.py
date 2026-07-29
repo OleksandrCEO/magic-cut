@@ -155,6 +155,10 @@ def render_playlist(
     for in_str, out_str, producer, body in entries:
         in_f, out_f = tc_to_frames(in_str, fps), tc_to_frames(out_str, fps)
         dur = out_f - in_f + 1
+        # a clip that already IS a silence (isolated by an earlier run) is dropped whole
+        if delete and any(rs <= in_f and out_f <= re for rs, re in regions):
+            all_pieces.append([])
+            continue
         # regions are source-relative (detected on the media file), same as in/out
         local = [(rs, re) for rs, re in regions if in_f <= rs and re <= out_f]
         pieces = (
@@ -289,10 +293,10 @@ def main() -> None:
 
     n_orig, n_new = len(a_entries), sum(len(p) for p in a_pieces)
     print(f"{dest}")
-    print(f"  clips: {n_orig} -> {n_new}  (+{n_new - n_orig})")
+    print(f"  clips: {n_orig} -> {n_new}  ({n_new - n_orig:+d})")
     if args.delete:
         removed = orig_total - new_total
-        print(f"  removed silences: {n_new - n_orig}  ({removed} frames, {removed / fps:.1f}s)")
+        print(f"  removed silence: {removed} frames, {removed / fps:.1f}s")
         print(f"  timeline length {orig_total} -> {new_total} frames  ({new_total / fps:.1f}s)")
     else:
         n_region = sum(1 for p in a_pieces for _pin, _pout, s in p if s)
