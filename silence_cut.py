@@ -21,6 +21,11 @@ base), and clip effects are copied verbatim onto each resulting piece (their
 filter ids are renumbered to stay unique). Regions falling in already-deleted
 stretches simply match no clip and are ignored.
 
+Multi-media aware: pass --silences MEDIA=FILE once per source file and each entry
+only sees the regions detected on ITS own media (resolved via producer -> resource).
+An unkeyed --silences FILE applies to every clip (fine when the project holds a
+single video); a clip whose media has no region set is left untouched.
+
 Assumptions:
   * audio track  = <playlist id=AUDIO_PLAYLIST>
   * video track  = <playlist id=VIDEO_PLAYLIST>, mirroring audio (same in/out list)
@@ -35,6 +40,7 @@ import argparse
 import re
 import sys
 import xml.dom.minidom
+from collections.abc import Callable
 
 AUDIO_PLAYLIST = "playlist2"
 VIDEO_PLAYLIST = "playlist4"
@@ -87,6 +93,16 @@ def load_regions(path: str, fps: float) -> list[tuple[int, int]]:
             pairs.append((float(a), float(b)))
 
     return [(round(a * fps), round(b * fps)) for a, b in pairs]
+
+
+def producer_media(text: str) -> dict[str, str]:
+    """Map each <producer>/<chain> id to its resource path."""
+    media: dict[str, str] = {}
+    for kind, pid, body in re.findall(r'<(producer|chain) id="([^"]+)"[^>]*>(.*?)</\1>', text, re.DOTALL):
+        res = re.search(r'<property name="resource">([^<]*)</property>', body)
+        if res:
+            media[pid] = res.group(1)
+    return media
 
 
 def split_entry(
@@ -145,7 +161,7 @@ def renumber_filters(body: str, counter: list[int]) -> str:
 
 def render_playlist(
     entries: list[tuple[str, str, str, str]], with_audio_prop: bool,
-    regions: list[tuple[int, int]], fps: float, pad: int, edge: int,
+    regions_for: Callable[[str], list[tuple[int, int]]], fps: float, pad: int, edge: int,
     min_entry_frames: int, counter: list[int], delete: bool,
 ) -> tuple[str, list[list[tuple[int, int, bool]]]]:
     lines: list[str] = []
@@ -153,6 +169,7 @@ def render_playlist(
         lines.append('  <property name="kdenlive:audio_track">1</property>')
     all_pieces: list[list[tuple[int, int, bool]]] = []
     for in_str, out_str, producer, body in entries:
+        regions = regions_for(producer)  # only the regions detected on THIS clip's media
         in_f, out_f = tc_to_frames(in_str, fps), tc_to_frames(out_str, fps)
         dur = out_f - in_f + 1
         # a clip that already IS a silence (isolated by an earlier run) is dropped whole
@@ -216,8 +233,10 @@ def replace_playlist(text: str, pid: str, body: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("project", help="path to the .kdenlive file")
-    ap.add_argument("--silences", "--regions", dest="regions", required=True,
-                    help="regions file (two floats per line, or ffmpeg silencedetect output)")
+    ap.add_argument("--silences", "--regions", dest="regions", required=True, action="append",
+                    help="regions file (two floats per line, or ffmpeg silencedetect output). "
+                         "Repeatable as MEDIA=FILE to bind a set to one source file; unkeyed "
+                         "applies to every clip")
     out = ap.add_mutually_exclusive_group(required=True)
     out.add_argument("--out", help="write result to this file")
     out.add_argument("--in-place", action="store_true", help="edit the project file in place")
@@ -237,8 +256,19 @@ def main() -> None:
 
     fps = args.fps or read_fps(text)
     pad = args.pad if args.pad is not None else max(1, round(DEFAULT_PAD_SECONDS * fps))
-    regions = load_regions(args.regions, fps)
     min_entry_frames = round(args.min_entry * fps)
+
+    # region sets keyed by media path; the None key (unkeyed --silences) applies to every clip
+    by_media: dict[str | None, list[tuple[int, int]]] = {}
+    for spec in args.regions:
+        key, _, path = spec.rpartition("=")
+        by_media.setdefault(key or None, []).extend(load_regions(path, fps))
+    media = producer_media(text)
+    if set(by_media) - {None} and not media:
+        sys.exit("no <producer>/<chain> resources found — cannot bind media-keyed region sets")
+
+    def regions_for(producer: str) -> list[tuple[int, int]]:
+        return by_media.get(None, []) + by_media.get(media.get(producer, ""), [])
 
     a_block = find_block(rf'<playlist id="{AUDIO_PLAYLIST}">.*?</playlist>', text)
     v_block = find_block(rf'<playlist id="{VIDEO_PLAYLIST}">.*?</playlist>', text)
@@ -255,10 +285,10 @@ def main() -> None:
     counter = [max(existing_ids) + 1 if existing_ids else 0]
 
     a_body, a_pieces = render_playlist(
-        a_entries, True, regions, fps, pad, args.edge_margin,
+        a_entries, True, regions_for, fps, pad, args.edge_margin,
         min_entry_frames, counter, args.delete)
     v_body, v_pieces = render_playlist(
-        v_entries, False, regions, fps, pad, args.edge_margin,
+        v_entries, False, regions_for, fps, pad, args.edge_margin,
         min_entry_frames, counter, args.delete)
     if a_pieces != v_pieces:
         sys.exit("audio/video split mismatch — aborting")

@@ -46,22 +46,32 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Resolve source media from the project if not given (first resource that is a real file).
-if [ -z "$MEDIA" ]; then
-  MEDIA="$(grep -oE '<property name="resource">[^<]+\.(mp4|mkv|mov|m4a|wav|webm|avi)' "$PROJECT" \
-             | sed -E 's/.*<property name="resource">//' | head -1 || true)"
+# Resolve source media from the project if not given (every distinct resource that is a real file);
+# a project may hold several different videos, each needing its own silence pass.
+if [ -n "$MEDIA" ]; then
+  MEDIAS=("$MEDIA")
+else
+  mapfile -t MEDIAS < <(grep -oE '<property name="resource">[^<]+\.(mp4|mkv|mov|m4a|wav|webm|avi)' "$PROJECT" \
+                          | sed -E 's/.*<property name="resource">//' | sort -u)
 fi
-[ -n "$MEDIA" ] && [ -f "$MEDIA" ] || { echo "source media not found (pass --media PATH): '$MEDIA'" >&2; exit 1; }
+[ "${#MEDIAS[@]}" -gt 0 ] || { echo "source media not found (pass --media PATH)" >&2; exit 1; }
 
-REGIONS="$(mktemp --suffix=.silences)"
-trap 'rm -f "$REGIONS"' EXIT
+TMPDIR_R="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_R"' EXIT
 
-echo "detecting silences: noise=${NOISE}dB min=${MINSIL}s  <-  $MEDIA"
-ffmpeg -hide_banner -i "$MEDIA" -af "silencedetect=noise=${NOISE}dB:d=${MINSIL}" -f null - 2>&1 \
-  | grep -E "silence_(start|end)" > "$REGIONS" || true
-echo "  found $(grep -c silence_end "$REGIONS" || echo 0) silence intervals"
-
-ARGS=(python3 "$SCRIPT_DIR/silence_cut.py" "$PROJECT" --silences "$REGIONS" --min-entry "$MINENTRY")
+ARGS=(python3 "$SCRIPT_DIR/silence_cut.py" "$PROJECT" --min-entry "$MINENTRY")
+i=0
+for M in "${MEDIAS[@]}"; do
+  [ -f "$M" ] || { echo "source media not found: '$M'" >&2; exit 1; }
+  REGIONS="$TMPDIR_R/$((i++)).silences"
+  echo "detecting silences: noise=${NOISE}dB min=${MINSIL}s  <-  $M"
+  ffmpeg -hide_banner -i "$M" -af "silencedetect=noise=${NOISE}dB:d=${MINSIL}" -f null - 2>&1 \
+    | grep -E "silence_(start|end)" > "$REGIONS" || true
+  echo "  found $(grep -c silence_end "$REGIONS" || echo 0) silence intervals"
+  # an explicit --media applies to every clip (it need not be a resource of the project);
+  # auto-detected ones are bound to their own media so clips never get another file's silences
+  if [ -n "$MEDIA" ]; then ARGS+=(--silences "$REGIONS"); else ARGS+=(--silences "$M=$REGIONS"); fi
+done
 [ -n "$PAD" ] && ARGS+=(--pad "$PAD")   # else engine uses its fps-aware default
 [ -n "$DELETE" ] && ARGS+=(--delete)
 if [ "$OUTMODE" = "--out" ]; then ARGS+=(--out "$OUTFILE"); else ARGS+=(--in-place); fi
