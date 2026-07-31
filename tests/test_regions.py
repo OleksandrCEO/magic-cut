@@ -6,12 +6,13 @@ Run: python3 tests/test_regions.py   (stdlib only, no framework — works from a
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from magcut.regions import (find_fillers, find_pauses, find_voiced_fillers,  # noqa: E402
-                            load_patterns, merge, normalize, read_loud)
+                            invert, load_patterns, merge, normalize, parse_silencedetect, read_loud)
 
 
 def w(text: str, start: float, end: float) -> dict:
@@ -81,11 +82,24 @@ def test_voiced_filler_respects_duration_floor_and_word_starts() -> None:
     assert find_voiced_fillers(VOICED, [(3.50, 4.20)], min_filler=0.3) == []      # a word starts here
 
 
+def test_parse_silencedetect_reads_pairs() -> None:
+    raw = ("[silencedetect] silence_start: 1.0\n[silencedetect] silence_end: 2.5\n"
+           "[silencedetect] silence_start: 3.0\n[silencedetect] silence_end: 3.4\n")
+    assert parse_silencedetect(raw) == [(1.0, 2.5), (3.0, 3.4)]
+
+
+def test_invert_covers_head_and_tail() -> None:
+    assert invert([(1.0, 2.5)], duration=4.0) == [(0.0, 1.0), (2.5, 4.0)]
+    assert invert([(0.0, 4.0)], duration=4.0) == []                     # nothing left to keep
+    assert invert([(1.0, 2.0), (1.5, 3.0)], duration=3.0) == [(0.0, 1.0)]  # overlapping cuts
+
+
 def test_read_loud_inverts_silencedetect() -> None:
     raw = "[silencedetect] silence_start: 1.0\n[silencedetect] silence_end: 2.5\n"
-    path = "/tmp/claude-1000/-home-config/240b2840-a745-4269-a648-b78a6157e501/scratchpad/_sil.txt"
-    open(path, "w", encoding="utf-8").write(raw)
-    assert read_loud(path, duration=4.0) == [(0.0, 1.0), (2.5, 4.0)]
+    path = Path(tempfile.gettempdir()) / "magcut_test_sil.txt"
+    path.write_text(raw, encoding="utf-8")
+    assert read_loud(str(path), duration=4.0) == [(0.0, 1.0), (2.5, 4.0)]
+    path.unlink()
 
 
 def test_merge_coalesces_touching_regions() -> None:

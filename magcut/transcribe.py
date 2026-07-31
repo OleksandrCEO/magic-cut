@@ -35,46 +35,23 @@ import time
 from pathlib import Path
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("media", help="path to the audio/video file")
-    ap.add_argument("--out", default=None,
-                    help="output JSON (default: <media>.words.json next to the media)")
-    ap.add_argument("--model", default="large-v3",
-                    help="faster-whisper model name or local path (default large-v3)")
-    ap.add_argument("--model-dir", default=None,
-                    help="cache directory for downloaded models (default: HF cache in $HOME)")
-    ap.add_argument("--language", default=None,
-                    help="force language code, e.g. uk (default: autodetect from first 30 s)")
-    ap.add_argument("--device", default="cuda", help="cuda or cpu (default cuda)")
-    ap.add_argument("--compute-type", default="float16",
-                    help="float16 | int8_float16 | int8 | float32 (default float16)")
-    ap.add_argument("--beam-size", type=int, default=5, help="decoding beam width (default 5)")
-    ap.add_argument("--no-vad", dest="vad", action="store_false",
-                    help="disable the Silero VAD pre-filter (it suppresses hallucinated "
-                         "words in long pauses; on by default)")
-    args = ap.parse_args()
-
+def transcribe(media: Path, out: Path, model_name: str = "large-v3", model_dir: str | None = None,
+               language: str | None = None, device: str = "cuda", compute_type: str = "float16",
+               beam_size: int = 5, vad: bool = True) -> Path:
+    """Run whisper over `media` and write the words JSON to `out`. Returns `out`."""
     # imported late so that --help stays instant and does not load CUDA
-    from faster_whisper import WhisperModel
-
-    media = Path(args.media)
-    if not media.is_file():
-        sys.exit(f"media not found: {media}")
-    out = Path(args.out) if args.out else media.with_suffix(media.suffix + ".words.json")
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        sys.exit("faster-whisper is missing — transcription needs the CUDA environment:\n"
+                 "  nix develop github:OleksandrCEO/magic-cut")
 
     t0 = time.monotonic()
-    model = WhisperModel(args.model, device=args.device,
-                         compute_type=args.compute_type, download_root=args.model_dir)
+    model = WhisperModel(model_name, device=device, compute_type=compute_type,
+                         download_root=model_dir)
 
-    segments, info = model.transcribe(
-        str(media),
-        language=args.language,
-        beam_size=args.beam_size,
-        word_timestamps=True,
-        vad_filter=args.vad,
-    )
+    segments, info = model.transcribe(str(media), language=language, beam_size=beam_size,
+                                      word_timestamps=True, vad_filter=vad)
     print(f"language={info.language} (p={info.language_probability:.2f})  "
           f"duration={info.duration:.1f}s", file=sys.stderr)
 
@@ -96,22 +73,51 @@ def main() -> None:
     if not words:
         sys.exit("ABORT (not written): no words recognised — wrong language or silent track?")
 
-    payload = {
+    out.write_text(json.dumps({
         "media": str(media.resolve()),
         "duration": round(info.duration, 3),
         "language": info.language,
-        "model": args.model,
-        "vad": args.vad,
+        "model": model_name,
+        "vad": vad,
         "words": words,
         "segments": segs,
-    }
-    out.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    }, ensure_ascii=False), encoding="utf-8")
 
     elapsed = time.monotonic() - t0
     speed = info.duration / elapsed if elapsed else 0
     print(f"{out}")
     print(f"  words: {len(words)}  segments: {len(segs)}")
     print(f"  media {info.duration:.1f}s in {elapsed:.0f}s  ({speed:.1f}x realtime)")
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("media", help="path to the audio/video file")
+    ap.add_argument("--out", default=None,
+                    help="output JSON (default: <media>.words.json next to the media)")
+    ap.add_argument("--model", default="large-v3",
+                    help="faster-whisper model name or local path (default large-v3)")
+    ap.add_argument("--model-dir", default=None,
+                    help="cache directory for downloaded models (default: HF cache in $HOME)")
+    ap.add_argument("--language", default=None,
+                    help="force language code, e.g. uk (default: autodetect from first 30 s)")
+    ap.add_argument("--device", default="cuda", help="cuda or cpu (default cuda)")
+    ap.add_argument("--compute-type", default="float16",
+                    help="float16 | int8_float16 | int8 | float32 (default float16)")
+    ap.add_argument("--beam-size", type=int, default=5, help="decoding beam width (default 5)")
+    ap.add_argument("--no-vad", dest="vad", action="store_false",
+                    help="disable the Silero VAD pre-filter (it suppresses hallucinated "
+                         "words in long pauses; on by default)")
+    args = ap.parse_args()
+
+    media = Path(args.media)
+    if not media.is_file():
+        sys.exit(f"media not found: {media}")
+    out = Path(args.out) if args.out else media.with_suffix(media.suffix + ".words.json")
+    transcribe(media, out, args.model, args.model_dir, args.language, args.device,
+               args.compute_type, args.beam_size, args.vad)
 
 
 if __name__ == "__main__":

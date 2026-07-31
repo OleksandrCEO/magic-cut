@@ -39,6 +39,7 @@ from pathlib import Path
 DEFAULT_FILLERS: tuple[str, ...] = ()
 
 DEFAULT_GAP = 0.66  # same default as the amplitude pass, so both agree on "this is a pause"
+DEFAULT_PAD = 1 / 6  # pause kept each side of a cut, so a pause shortens instead of vanishing
 
 
 def normalize(word: str) -> str:
@@ -96,20 +97,29 @@ def find_fillers(words: list[dict], patterns: list[re.Pattern[str]]) -> tuple[li
     return regions, hits
 
 
-def read_loud(path: str, duration: float) -> list[tuple[float, float]]:
-    """Loud regions = the inverse of ffmpeg silencedetect output."""
-    raw = Path(path).read_text(encoding="utf-8")
+def parse_silencedetect(raw: str) -> list[tuple[float, float]]:
+    """ffmpeg silencedetect output -> the silent regions it reports."""
     starts = [float(x) for x in re.findall(r"silence_start:\s*(-?[\d.]+)", raw)]
     ends = [float(x) for x in re.findall(r"silence_end:\s*([\d.]+)", raw)]
-    loud: list[tuple[float, float]] = []
+    return sorted(zip(starts, ends, strict=False))
+
+
+def invert(regions: list[tuple[float, float]], duration: float) -> list[tuple[float, float]]:
+    """Everything in [0, duration] that the given regions do NOT cover."""
+    gaps: list[tuple[float, float]] = []
     prev = 0.0
-    for s, e in sorted(zip(starts, ends, strict=False)):
+    for s, e in sorted(regions):
         if s > prev:
-            loud.append((prev, s))
+            gaps.append((prev, s))
         prev = max(prev, e)
     if duration > prev:
-        loud.append((prev, duration))
-    return loud
+        gaps.append((prev, duration))
+    return gaps
+
+
+def read_loud(path: str, duration: float) -> list[tuple[float, float]]:
+    """Loud regions = the inverse of ffmpeg silencedetect output."""
+    return invert(parse_silencedetect(Path(path).read_text(encoding="utf-8")), duration)
 
 
 def find_voiced_fillers(words: list[dict], loud: list[tuple[float, float]],

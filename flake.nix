@@ -35,7 +35,7 @@
       pythonEnv = pkgs.python3.withPackages (ps: with ps; [ faster-whisper ]);
     in
     {
-      packages.${system}.default = pkgs.callPackage ./package.nix { };
+      packages.${system}.default = pkgs.callPackage ./package.nix { inherit pythonEnv runtimeLibs; };
 
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = [ pythonEnv pkgs.ffmpeg ];

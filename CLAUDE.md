@@ -7,11 +7,13 @@ Python 3.13, **stdlib only** everywhere except `magcut/transcribe.py` (faster-wh
 
 Detection and application are separate halves, joined by one text format:
 
-- `magcut/transcribe.py` — media → `*.words.json`. Expensive GPU pass, run once per video.
+- `magcut/cli.py` — the `magcut` command, sole entry point. `video.mp4` → render `-edited.mp4`;
+  `project.kdenlive` → `os.execv` into `kdenlive/cut-silences.sh` (the add-on keeps its own flags).
+- `magcut/media.py` — everything that shells out to ffmpeg/ffprobe: duration, silencedetect, render.
+- `magcut/transcribe.py` — media → `*.words.json`. Expensive GPU pass, run once per video (cached next to it).
 - `magcut/regions.py` — `*.words.json` → regions. Cheap, stdlib, re-run freely to re-tune thresholds.
 - `kdenlive/silence_cut.py` — regions → split `.kdenlive` timeline (MLT XML, text-level rewriting, no XML DOM building).
-  This is the only consumer that exists; rendering cut video with ffmpeg is still manual (README §3).
-- `kdenlive/cut-silences.sh` — `ffmpeg silencedetect` + call the engine. The `magcut` command wraps this script.
+- `kdenlive/cut-silences.sh` — `ffmpeg silencedetect` + call the engine.
 - `tests/` — plain `assert` self-checks, no framework.
 
 **Region interchange format:** `"<start> <end>"` seconds per line, absolute from media start. Every producer writes it,
@@ -42,8 +44,10 @@ No linter/typechecker is configured. See README.md for user-facing usage and fla
   empty on purpose.
 - **Don't use the transcript for pauses** — `ffmpeg silencedetect` finds more and with tighter borders (measured;
   stronger whisper models are *worse* here). Transcript is for fillers and text.
-- Word timings carry ±0.1–0.2 s error, compensated by the engine's `--pad`. Never default `--pad` to 0.
-- `package.nix` ships only the kdenlive path (`magcut` command + KDE service menu); `transcribe.py` lives in the
-  devShell instead, because faster-whisper + CUDA cannot go into a lightweight package.
+- Word timings carry ±0.1–0.2 s error, compensated by `--pad`. Never default `--pad` to 0.
+- **Cutting video cannot use `-c copy`** — keyframes sit seconds apart in screencasts, so a stream copy moves every
+  cut. `media.py` re-encodes with the magpress screencast profile (nvenc cq 28, x264 crf 28 when no GPU).
+- `package.nix` takes `pythonEnv` + `runtimeLibs` from `flake.nix`, so `--fillers` works from the installed command.
+  Same nixpkgs as MagType → identical store paths, no extra disk for the CUDA stack.
 
 `docs/claude.md` is a guide on writing this file, not project docs.
