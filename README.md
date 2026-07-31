@@ -47,6 +47,39 @@ services.magcut.enable = true;
 nix develop github:OleksandrCEO/magic-cut
 ```
 
+### Пункт правого кліку (за бажанням)
+
+Пакет **навмисно не ставить** власний KDE service menu: якщо два `.desktop`-файли мають однаковий
+`X-KDE-Submenu`, KDE зливає їх в одне підменю — пункти двояться, а іконка підменю дістається тому
+файлу, який виграв. Тому меню лишається на боці конфігу, поруч з рештою твоїх інструментів:
+
+```nix
+environment.systemPackages = [
+  (pkgs.writeTextDir "share/kio/servicemenus/magic-cut.desktop" ''
+    [Desktop Entry]
+    Type=Service
+    MimeType=video/mp4;video/x-matroska;video/quicktime;video/webm;
+    Actions=cut-silence;cut-fillers;
+    X-KDE-Submenu=Video Toolbox
+    Icon=video-television
+
+    [Desktop Action cut-silence]
+    Name=Вирізати тишу
+    Icon=audio-volume-muted
+    Exec=konsole --hold -e magcut %f
+
+    [Desktop Action cut-fillers]
+    Name=Вирізати сміття
+    Icon=edit-cut
+    Exec=konsole --hold -e magcut %f --fillers
+  '')
+];
+```
+
+`%f`, а не `%F` — CLI приймає рівно один файл. Якщо в тебе вже є підменю з іншими інструментами,
+**не створюй окремий файл**, а додай ці дві дії до наявного: інакше отримаєш саме те злиття, про
+яке йдеться вище.
+
 ---
 
 ## 1. Вирізати — команда `magcut`
