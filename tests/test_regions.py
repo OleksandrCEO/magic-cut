@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Self-check: transcript -> regions derivation.
 
-Run: python3 test_words_to_regions.py   (stdlib only, no framework)
+Run: python3 tests/test_regions.py   (stdlib only, no framework — works from any directory)
 """
 from __future__ import annotations
 
-from words_to_regions import (find_fillers, find_pauses, find_voiced_fillers, load_patterns, merge,
-                              normalize, read_loud)
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from magcut.regions import (find_fillers, find_pauses, find_voiced_fillers,  # noqa: E402
+                            load_patterns, merge, normalize, read_loud)
 
 
 def w(text: str, start: float, end: float) -> dict:
@@ -35,14 +40,21 @@ def test_min_prob_ignores_words_with_smeared_boundaries() -> None:
     assert find_pauses(smeared, duration=4.0, gap=0.66, min_prob=0.3) == [(0.0, 3.0)]
 
 
-def test_default_fillers_catch_hesitation_not_conjunctions() -> None:
-    regions, hits = find_fillers(WORDS, load_patterns(None))
+def test_no_default_filler_patterns() -> None:
+    # whisper never transcribes hesitation sounds, so a built-in pattern list would only pretend
+    # to work; the caller must name filler WORDS explicitly
+    assert find_fillers(WORDS, load_patterns(None)) == ([], {})
+
+
+def test_explicit_pattern_matches_normalized_word() -> None:
+    # a comma inside the quantifier must survive — this is why there is no separator char
+    regions, hits = find_fillers(WORDS, load_patterns([r"[еэe]{2,}"]))
     assert regions == [(1.6, 2.1)], regions   # "А" is a word, not a hesitation — must survive
     assert hits == {"еее": 1}
 
 
 def test_inline_filler_list() -> None:
-    regions, _ = find_fillers(WORDS, load_patterns("почнемо"))
+    regions, _ = find_fillers(WORDS, load_patterns(["почнемо"]))
     assert regions == [(4.0, 4.6)], regions
 
 

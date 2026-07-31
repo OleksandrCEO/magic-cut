@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Self-check: each clip must be cut ONLY by the silences of its own media.
 
-Run: python3 test_silence_cut.py   (stdlib only, no framework)
+Run: python3 tests/test_kdenlive.py   (stdlib only, no framework — works from any directory)
 """
 from __future__ import annotations
 
 import re
+import sys
+from pathlib import Path
 
-from silence_cut import producer_media, render_playlist, split_entry
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from kdenlive.silence_cut import producer_media, render_playlist, split_entry  # noqa: E402
 
 XML = """
  <chain id="chain0"><property name="resource">/m/A.mp4</property></chain>

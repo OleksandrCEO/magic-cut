@@ -32,9 +32,11 @@ import sys
 import unicodedata
 from pathlib import Path
 
-# Hesitation SOUNDS only. Real filler WORDS ("ну", "типу", "коротше") are ordinary vocabulary
-# as well, so cutting them blind would mangle sentences — put those in your own --fillers file.
-DEFAULT_FILLERS: tuple[str, ...] = (r"[еэe]{2,}", r"[аa]{2,}", r"[мm]{2,}", r"ем+", r"хм+", r"ух")
+# Deliberately EMPTY. Patterns like r"[еэe]{2,}" look useful but never match: whisper does not
+# transcribe hesitation sounds at all (measured — see find_voiced_fillers, that is what --loud is
+# for). This option is only for filler WORDS ("ну", "типу"), which are ordinary vocabulary too,
+# so there is no safe default — name them yourself via --fillers.
+DEFAULT_FILLERS: tuple[str, ...] = ()
 
 DEFAULT_GAP = 0.66  # same default as the amplitude pass, so both agree on "this is a pause"
 
@@ -44,14 +46,18 @@ def normalize(word: str) -> str:
     return "".join(c for c in word.casefold() if unicodedata.category(c)[0] in "LN")
 
 
-def load_patterns(spec: str | None) -> list[re.Pattern[str]]:
-    """--fillers is either a path to a newline list or a comma-separated inline list."""
-    if spec is None:
-        raw: list[str] = list(DEFAULT_FILLERS)
-    elif Path(spec).is_file():
-        raw = [ln.strip() for ln in Path(spec).read_text(encoding="utf-8").splitlines()]
-    else:
-        raw = [p.strip() for p in spec.split(",")]
+def load_patterns(specs: list[str] | None) -> list[re.Pattern[str]]:
+    """Each --fillers is either a path to a newline list or one regex.
+
+    No separator char is used on purpose: a comma-separated list would split "[еэe]{2,}" in half,
+    and every other candidate separator collides with regex syntax just as badly. Repeat the flag.
+    """
+    raw: list[str] = list(DEFAULT_FILLERS)
+    for spec in specs or ():
+        if Path(spec).is_file():
+            raw += [ln.strip() for ln in Path(spec).read_text(encoding="utf-8").splitlines()]
+        else:
+            raw.append(spec.strip())
     return [re.compile(p) for p in raw if p and not p.startswith("#")]
 
 
@@ -154,9 +160,10 @@ def main() -> None:
     ap.add_argument("--out", default=None, help="output regions file (default: stdout)")
     ap.add_argument("--gap", type=float, default=DEFAULT_GAP,
                     help=f"shortest wordless stretch counted as a pause (default {DEFAULT_GAP}s)")
-    ap.add_argument("--fillers", default=None,
-                    help="file with one regex per line, or an inline comma-separated list. "
-                         f"Default: {','.join(DEFAULT_FILLERS)}")
+    ap.add_argument("--fillers", action="append", default=None, metavar="FILE|REGEX",
+                    help="file with one regex per line, or a single regex; repeat the flag to add "
+                         "more. No default — hesitation SOUNDS are not transcribed at all, use "
+                         "--loud for those; this is only for filler WORDS you name yourself.")
     ap.add_argument("--loud", default=None,
                     help="ffmpeg silencedetect output for the SAME media — enables detection of "
                          "hesitation SOUNDS ('е-е-е'), which whisper never transcribes. "
