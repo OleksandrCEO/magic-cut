@@ -14,15 +14,38 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from magcut import media as mediatools
-from magcut.regions import DEFAULT_GAP, DEFAULT_PAD, find_voiced_fillers, invert, merge
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # run as a script, not only as a module
+
+from magcut import media as mediatools  # noqa: E402
+from magcut.regions import (DEFAULT_GAP, DEFAULT_PAD, find_voiced_fillers,  # noqa: E402
+                            invert, merge)
 
 LOUD_NOISE_DB = -35.0  # finer threshold than the pause pass: a filler is loud, only wordless
 LOUD_MIN_DUR = 0.15
+
+
+def inhibit_sleep() -> None:
+    """Re-exec under systemd-inhibit (same trick as magpress) — a 45 min render outlives the idle timer.
+
+    The env flag is what stops the second run from wrapping itself again; it also lets you opt out
+    with MAGCUT_INHIBITED=1 when systemd-inhibit is in the way.
+    """
+    if os.environ.get("MAGCUT_INHIBITED") or not shutil.which("systemd-inhibit"):
+        return
+    # it exists but may still fail (no session bus, container) — and re-exec is a one-way door,
+    # so prove it works on a no-op first instead of losing the whole run
+    if subprocess.run(["systemd-inhibit", "--what=idle", "--mode=block", "true"],
+                      capture_output=True).returncode != 0:
+        return
+    os.environ["MAGCUT_INHIBITED"] = "1"
+    os.execvp("systemd-inhibit", ["systemd-inhibit", "--who=MagCut", "--why=Video render",
+                                  "--mode=block", "--what=idle:sleep:handle-lid-switch",
+                                  sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]])
 
 
 def hesitations(video: Path, duration: float, language: str | None, model: str) -> list[tuple[float, float]]:
@@ -68,6 +91,7 @@ def main() -> None:
     out = Path(args.out) if args.out else source.with_name(f"{source.stem}-edited.mp4")
     if out.resolve() == source.resolve():
         sys.exit("refusing to overwrite the source file — pass a different --out")
+    inhibit_sleep()  # everything below is minutes of GPU/CPU work
 
     duration = mediatools.duration(source)
     cuts = mediatools.silences(source, args.noise, args.min_silence)

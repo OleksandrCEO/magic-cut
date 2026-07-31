@@ -1,5 +1,5 @@
 { lib, stdenv, makeWrapper, writeTextDir, symlinkJoin, ffmpeg, coreutils, gnugrep, gnused,
-  libnotify, pythonEnv, runtimeLibs }:
+  libnotify, systemd, pythonEnv, runtimeLibs }:
 
 # Packages the `magcut` command plus KDE service menus (right-click a video or a .kdenlive
 # project → "MagWer Video Toolbox").
@@ -13,6 +13,7 @@ let
     pythonEnv   # the engine (stdlib) + faster-whisper for --fillers
     ffmpeg      # silencedetect, rendering
     libnotify   # notify-send when a render finishes
+    systemd     # systemd-inhibit: keep the machine awake through a long render
     coreutils   # mktemp, readlink, dirname, head
     gnugrep     # parse silencedetect output / project resource
     gnused      # extract the resource path
