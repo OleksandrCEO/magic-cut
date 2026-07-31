@@ -22,7 +22,7 @@ every consumer reads it. Adding a new detector means emitting this format — ne
 ## Commands
 
 ```bash
-python3 tests/test_regions.py && python3 tests/test_kdenlive.py   # run after any change
+python3 tests/test_regions.py && python3 tests/test_kdenlive.py && python3 tests/test_media.py   # after any change
 nix develop                                                        # only needed for transcribe.py (CUDA)
 ```
 
@@ -47,6 +47,9 @@ No linter/typechecker is configured. See README.md for user-facing usage and fla
 - Word timings carry ±0.1–0.2 s error, compensated by `--pad`. Never default `--pad` to 0.
 - **Cutting video cannot use `-c copy`** — keyframes sit seconds apart in screencasts, so a stream copy moves every
   cut. `media.py` re-encodes with the magpress screencast profile (nvenc cq 28, x264 crf 28 when no GPU).
+- **ffmpeg's expression parser dies at 100 nested terms** with `ENOMEM` ("Cannot allocate memory"), and a 16 min
+  video easily needs 140+. `keep_expr()` therefore emits a balanced `((a+b)+(c+d))` tree, not a flat `a+b+c`.
+  Measured: flat breaks between 100 and 140 terms, the tree handles 400+. Covered by `tests/test_media.py`.
 - `package.nix` takes `pythonEnv` + `runtimeLibs` from `flake.nix`, so `--fillers` works from the installed command.
   Same nixpkgs as MagType → identical store paths, no extra disk for the CUDA stack.
 

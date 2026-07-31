@@ -282,6 +282,7 @@ python3 kdenlive/silence_cut.py проєкт.kdenlive --silences ділянки.
 ```bash
 python3 tests/test_regions.py
 python3 tests/test_kdenlive.py
+python3 tests/test_media.py
 ```
 
 Лише stdlib, без фреймворків. Запускаються з будь-якої теки.

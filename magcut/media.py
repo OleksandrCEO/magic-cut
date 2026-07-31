@@ -57,11 +57,25 @@ def silences(media: Path, noise_db: float, min_dur: float) -> list[tuple[float, 
     return parse_silencedetect(stderr)
 
 
+def keep_expr(keep: list[tuple[float, float]]) -> str:
+    """A select() expression matching any of the kept regions, as a BALANCED sum tree.
+
+    "a+b+c+..." written flat dies at 100 terms: ffmpeg's expression parser guards its own stack
+    with a depth counter and returns ENOMEM ("Cannot allocate memory") past it. Pairing the terms
+    up — ((a+b)+(c+d)) — makes the depth log2(n) instead of n, so thousands of regions parse fine.
+    """
+    terms = [f"between(t,{s:.3f},{e:.3f})" for s, e in keep]
+    while len(terms) > 1:
+        terms = [f"({terms[i]}+{terms[i + 1]})" if i + 1 < len(terms) else terms[i]
+                 for i in range(0, len(terms), 2)]
+    return terms[0]
+
+
 def render(media: Path, keep: list[tuple[float, float]], out: Path) -> None:
     """Write `out` holding only the kept regions, concatenated in order."""
     if not keep:
         sys.exit("nothing would be left — refusing to render an empty file")
-    expr = "+".join(f"between(t,{s:.3f},{e:.3f})" for s, e in keep)
+    expr = keep_expr(keep)
     # a filter script file, not -filter_complex: with hundreds of regions the expression easily
     # outgrows the command line
     graph = (f"[0:v]select='{expr}',setpts=N/FRAME_RATE/TB[v];"
