@@ -3,6 +3,7 @@
 
   magcut video.mp4              silence only          -> video-edited.mp4
   magcut video.mp4 --fillers    silence + "е-е-е"     -> video-edited.mp4  (needs whisper/GPU)
+  magcut video.mp4 --text       transcript only, no render -> video.txt   (needs whisper/GPU)
   magcut project.kdenlive       split the timeline instead of rendering (kdenlive/ add-on)
 
 Pauses always come from ffmpeg silencedetect, never from the transcript: measured on real
@@ -48,8 +49,8 @@ def inhibit_sleep() -> None:
                                   sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]])
 
 
-def hesitations(video: Path, duration: float, language: str | None, model: str) -> list[tuple[float, float]]:
-    """Loud stretches that start no word. Reuses <video>.words.json if it is already there."""
+def transcript(video: Path, language: str | None, model: str) -> dict:
+    """The whole <video>.words.json, transcribing only if it is not already cached next to the video."""
     from magcut.transcribe import transcribe
 
     words_json = video.with_suffix(video.suffix + ".words.json")
@@ -57,7 +58,12 @@ def hesitations(video: Path, duration: float, language: str | None, model: str) 
         print(f"reusing transcript {words_json.name} (delete it to re-transcribe)", file=sys.stderr)
     else:
         transcribe(video, words_json, model_name=model, language=language)
-    words = json.loads(words_json.read_text(encoding="utf-8"))["words"]
+    return json.loads(words_json.read_text(encoding="utf-8"))
+
+
+def hesitations(video: Path, duration: float, language: str | None, model: str) -> list[tuple[float, float]]:
+    """Loud stretches that start no word. Reuses <video>.words.json if it is already there."""
+    words = transcript(video, language, model)["words"]
     loud = invert(mediatools.silences(video, LOUD_NOISE_DB, LOUD_MIN_DUR), duration)
     return find_voiced_fillers(words, loud, min_filler=0.3)
 
@@ -68,6 +74,8 @@ def main() -> None:
     ap.add_argument("input", help="video file, or a .kdenlive project (handled by the add-on)")
     ap.add_argument("--fillers", action="store_true",
                     help="also cut hesitation sounds ('е-е-е') — transcribes the video first")
+    ap.add_argument("--text", action="store_true",
+                    help="write the transcript to <input>.txt instead of rendering (needs whisper/GPU)")
     ap.add_argument("--noise", type=float, default=-20.0, help="silence threshold in dB (default -20)")
     ap.add_argument("--min-silence", type=float, default=DEFAULT_GAP,
                     help=f"shortest silence worth cutting (default {DEFAULT_GAP}s)")
@@ -87,6 +95,15 @@ def main() -> None:
         os.execv(str(script), [str(script), str(source), *sys.argv[2:]])  # noqa: S606 — fixed path
     if rest:
         ap.error(f"unknown arguments: {' '.join(rest)}")
+
+    if args.text:
+        out = Path(args.out) if args.out else source.with_suffix(".txt")
+        inhibit_sleep()  # a GPU pass over an hour of video outlives the idle timer too
+        segs = transcript(source, args.language, args.model)["segments"]
+        out.write_text("\n".join(s["t"] for s in segs) + "\n", encoding="utf-8")
+        print(f"{out}")
+        subprocess.run(["notify-send", "-i", "text-x-generic", "MagCut", out.name], check=False)
+        return
 
     out = Path(args.out) if args.out else source.with_name(f"{source.stem}-edited.mp4")
     if out.resolve() == source.resolve():
