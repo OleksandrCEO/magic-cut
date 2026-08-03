@@ -47,6 +47,9 @@ services.magcut.enable = true;
 nix develop github:OleksandrCEO/magic-cut
 ```
 
+У клоні репозиторію є `.envrc` (`use flake`) — з direnv оточення підхоплюється саме, `nix develop`
+руками не потрібен. Перший вхід у каталог: `direnv allow`.
+
 ### Пункт правого кліку (за бажанням)
 
 Пакет **навмисно не ставить** власний KDE service menu: якщо два `.desktop`-файли мають однаковий
@@ -59,7 +62,7 @@ environment.systemPackages = [
     [Desktop Entry]
     Type=Service
     MimeType=video/mp4;video/x-matroska;video/quicktime;video/webm;
-    Actions=cut-silence;cut-fillers;
+    Actions=cut-silence;cut-fillers;transcribe;
     X-KDE-Submenu=Video Toolbox
     Icon=video-television
 
@@ -72,6 +75,11 @@ environment.systemPackages = [
     Name=Вирізати сміття
     Icon=edit-cut
     Exec=konsole --hold -e magcut %f --fillers
+
+    [Desktop Action transcribe]
+    Name=Транскрибувати
+    Icon=text-x-generic
+    Exec=konsole --hold -e magcut %f --text
   '')
 ];
 ```
@@ -88,6 +96,7 @@ environment.systemPackages = [
 magcut відео.mp4                          # тиша: −20 dB, паузи від 0.66 с
 magcut відео.mp4 --fillers                # + екання «е-е-е» (потрібен GPU, перший раз повільно)
 magcut відео.mp4 --noise -25 --pad 0.3    # менш агресивно, більше паузи лишити
+magcut відео.mp4 --text                   # не різати, а покласти поряд текст -> відео.txt
 ```
 
 Результат — `відео-edited.mp4` поряд з оригіналом. Оригінал не чіпається.
@@ -96,12 +105,13 @@ magcut відео.mp4 --noise -25 --pad 0.3    # менш агресивно, б
 |---|---|---|
 | `ВІДЕО` | — | mp4/mkv/mov/webm, або `.kdenlive` (тоді працює надбудова з розділу 4) |
 | `--fillers` | вимкнено | додатково різати екання — транскрибує відео через whisper |
+| `--text` | вимкнено | замість рендеру записати транскрипт у `<відео>.txt` (потрібен GPU) |
 | `--noise DB` | `-20` | поріг гучності: тихіше за нього = тиша |
 | `--min-silence SEC` | `0.66` | найкоротша тиша, яку варто різати |
 | `--pad SEC` | `0.17` | скільки паузи лишити з кожного боку розрізу |
 | `--language CODE` | автовизначення | мова транскрипту, напр. `uk` (лише з `--fillers`) |
 | `--model NAME` | `large-v3` | модель whisper (лише з `--fillers`) |
-| `--out FILE` | `<відео>-edited.mp4` | інший шлях результату |
+| `--out FILE` | `<відео>-edited.mp4` (`.txt` з `--text`) | інший шлях результату |
 
 Що звідки береться: **паузи — завжди `ffmpeg silencedetect`** (виміряно: амплітуда знаходить їх
 більше й з тіснішими межами, ніж транскрипт), **екання — транскрипт + гучність** (вони гучні, тож
